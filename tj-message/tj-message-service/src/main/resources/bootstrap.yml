@@ -46,3 +46,7 @@ tj:
         - /users/ids
   jdbc:
     database: tj_message
+  sms:
+    ali:
+      accessId: ${ALI_ACCESS_KEY_ID}
+      accessSecret: ${ALI_ACCESS_KEY_SECRET}
