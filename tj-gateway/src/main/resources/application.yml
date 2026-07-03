@@ -10,6 +10,10 @@ spring:
   cloud:
     gateway:
       routes:
+        - id: ais
+          uri: lb://aigc-service
+          predicates:
+            - Path=/ais/**
         - id: ms
           uri: lb://media-service
           predicates:

@@ -3,6 +3,7 @@ package com.tianji.gateway.exception.handler;
 import com.tianji.common.constants.Constant;
 import com.tianji.common.domain.R;
 import com.tianji.common.exceptions.CommonException;
+import com.tianji.common.exceptions.ForbiddenException;
 import com.tianji.common.exceptions.UnauthorizedException;
 import com.tianji.common.utils.JsonUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,14 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler, Ordere
         if (ex instanceof UnauthorizedException) {
             // 登录异常，直接返回状态码
             UnauthorizedException e = (UnauthorizedException) ex;
+            log.warn("网关鉴权失败 -> path: {}, code: {}, msg: {}",
+                    exchange.getRequest().getPath(), e.getCode(), e.getMessage());
+            return Mono.error(new ResponseStatusException(e.getStatus(), e.getMessage(), e));
+        } else if (ex instanceof ForbiddenException) {
+            // 无权访问，记录一条告警日志
+            ForbiddenException e = (ForbiddenException) ex;
+            log.warn("网关权限不足 -> path: {}, code: {}, msg: {}",
+                    exchange.getRequest().getPath(), e.getCode(), e.getMessage());
             return Mono.error(new ResponseStatusException(e.getStatus(), e.getMessage(), e));
         } else if (ex instanceof CommonException) {
             CommonException e = (CommonException) ex;
