@@ -59,4 +59,13 @@ public class ChatSessionServiceImpl implements ChatSessionService {
         return sessionVO;
 
     }
+
+    /**
+     * 获取热门会话
+     * @return 热门会话列表
+     */
+    @Override
+    public List<SessionVO.Example> getHotSessions(Integer num) {
+        return RandomUtil.randomEleList(sessionProperties.getExamples(),num);
+    }
 }

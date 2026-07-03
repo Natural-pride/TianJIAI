@@ -3,6 +3,8 @@ package com.tianji.service;
 
 import com.tianji.vo.SessionVO;
 
+import java.util.List;
+
 /**
  * @Name: ChatSessionService
  * @Author: Natural Pride
@@ -14,4 +16,7 @@ public interface ChatSessionService {
 
     // 创建会话
     SessionVO createSession(Integer num);
+
+    // 获取热门会话
+    List<SessionVO.Example> getHotSessions(Integer num);
 }

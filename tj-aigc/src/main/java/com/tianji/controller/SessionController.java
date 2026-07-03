@@ -5,10 +5,9 @@ import com.tianji.service.ChatSessionService;
 import com.tianji.vo.SessionVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * @Name:SessionController.java
@@ -34,6 +33,15 @@ public class SessionController {
     @PostMapping
     public SessionVO createSession(@RequestParam(value = "n", defaultValue = "3") Integer num) {
         return chatSessionService.createSession(num);
+    }
+
+    /**
+     * 获取热门会话
+     * @return 热门会话信息
+     */
+    @GetMapping("/hot")
+    public List<SessionVO.Example> getHotSessions(@RequestParam(value = "n",defaultValue = "3") Integer num) {
+        return chatSessionService.getHotSessions(num);
     }
 
 }
