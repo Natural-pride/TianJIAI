@@ -19,7 +19,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/session")
 @RequiredArgsConstructor
-@Tag(name = "会话控制器", description = "用于创建和管理会话")
+@Tag(name = "会话接口", description = "用于创建和管理会话")
 public class SessionController {
 
     private final ChatSessionService chatSessionService;
