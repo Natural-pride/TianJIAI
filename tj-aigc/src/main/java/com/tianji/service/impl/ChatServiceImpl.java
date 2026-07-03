@@ -1,6 +1,8 @@
 package com.tianji.service.impl;
 
 
+import cn.hutool.core.date.DateUtil;
+import com.tianji.config.SystemPromptConfig;
 import com.tianji.enums.ChatEventTypeEnum;
 import com.tianji.service.ChatService;
 import com.tianji.vo.ChatEventVO;
@@ -9,6 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @Name: ChatServiceImpl
@@ -23,6 +29,11 @@ import reactor.core.publisher.Flux;
 public class ChatServiceImpl implements ChatService {
 
     private final ChatClient chatClient;
+    private final SystemPromptConfig systemPromptConfig;
+
+    // 存储大模型的生成状态，这里采用ConcurrentHashMap是确保线程安全
+    // 目前的版本暂时用Map实现，如果考虑分布式环境的话，可以考虑用redis来实现
+    private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
 
     /**
      * 流式聊天：将用户问题提交给大模型，并以事件流的方式持续推送 AI 回复片段，
@@ -36,9 +47,24 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<ChatEventVO> chat(String question, String sessionId) {
         return chatClient.prompt()
+                .system(promptSystem ->promptSystem
+                        .text(systemPromptConfig.getChatSystemMessage().get()) // 系统提示词
+                        .param("now", DateUtil.now())) // 当前时间
                 .user(question) // 用户问题
                 .stream() // 流式输出
+                // TODO 为什么要这样写？chatResponse()
                 .chatResponse() // 大模型响应
+                .doFirst(()->{
+                    // 请求大模型之前先打标记
+                    GENERATE_STATUS.put(sessionId, true);
+                })
+                .doOnComplete(()->{
+                    // 大模型输出完成，删除标记
+                    GENERATE_STATUS.remove(sessionId);
+                })
+                .doOnError(throwable -> GENERATE_STATUS.remove(sessionId))  // 大模型输出错误，删除标记
+                // 只要生成状态存在，就继续流式输出
+                .takeWhile(s-> Optional.ofNullable(GENERATE_STATUS.get(sessionId)).orElse(false))
                 // 将大模型流式输出的每个 chunk 转换为前端可消费的 DATA 事件
                 .map(chatResponse -> { //
                     String content = chatResponse.getResult().getOutput().getText(); // 响应内容
@@ -51,5 +77,10 @@ public class ChatServiceImpl implements ChatService {
                 .concatWith(Flux.just(ChatEventVO.builder()
                         .eventType(ChatEventTypeEnum.STOP.getValue())
                         .build()));
+    }
+
+    @Override
+    public void stop(String sessionId) {
+        GENERATE_STATUS.remove(sessionId);
     }
 }

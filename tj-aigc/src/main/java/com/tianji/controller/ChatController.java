@@ -39,4 +39,12 @@ public class ChatController {
         return chatService.chat(chatDTO.getQuestion(),chatDTO.getSessionId());
     }
 
+    /**
+     * 停止聊天
+      * @param sessionId 会话ID
+     */
+    @PostMapping("/stop")
+    public void stop(@RequestParam("sessionId") String sessionId) {
+        chatService.stop(sessionId);
+    }
 }

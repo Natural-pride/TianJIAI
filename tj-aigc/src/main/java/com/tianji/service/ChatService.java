@@ -15,4 +15,7 @@ public interface ChatService {
 
     // 流式聊天
     Flux<ChatEventVO> chat(String question, String sessionId);
+
+    // 停止聊天
+    void stop(String sessionId);
 }
