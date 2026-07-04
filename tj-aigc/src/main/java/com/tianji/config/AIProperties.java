@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "tj.ai.prompt")
 public class AIProperties {
 
+    //  系统配置，自动绑定所有嵌套属性
     private System system;
 
     @Data

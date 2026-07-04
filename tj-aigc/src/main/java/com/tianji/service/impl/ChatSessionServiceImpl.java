@@ -31,6 +31,7 @@ import static com.baomidou.mybatisplus.extension.toolkit.Db.save;
 @RequiredArgsConstructor
 public class ChatSessionServiceImpl implements ChatSessionService {
 
+
     private final SessionProperties sessionProperties;
 
     @Override
