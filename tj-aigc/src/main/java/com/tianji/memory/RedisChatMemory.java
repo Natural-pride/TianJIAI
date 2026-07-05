@@ -3,7 +3,6 @@ package com.tianji.memory;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.json.JSONUtil;
 import jakarta.annotation.Resource;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.data.redis.core.BoundListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -79,17 +78,17 @@ public class RedisChatMemory implements ChatMemory {
 
     /**
      * 批量添加消息到指定会话
-     * 
+     *
      * 执行流程：
      * 1. 空消息列表防御：如果 messages 为空直接返回，避免无用 Redis 操作
      * 2. 生成 Redis Key：prefix + conversationId
      * 3. 获取 List 操作器：BoundListOperations 绑定到指定 Key
-     * 4. 序列化并追加：每条 Message 转为 JSON，从右侧追加到 List
-     * 
+     * 4. 序列化并追加：每条 Message 转为包装类 JSON，从右侧追加到 List
+     *
      * Redis 命令对应：
-     * RPUSH CHAT:123 '{"role":"user","content":"你好"}'
-     * RPUSH CHAT:123 '{"role":"assistant","content":"您好！"}'
-     * 
+     * RPUSH CHAT:123 '{"messageType":"USER","textContent":"你好"}'
+     * RPUSH CHAT:123 '{"messageType":"ASSISTANT","textContent":"您好！"}'
+     *
      * @param conversationId 会话 ID（格式：用户ID_会话ID）
      * @param messages       需要添加的消息列表（通常包含用户问题和 AI 回答）
      */
@@ -99,43 +98,45 @@ public class RedisChatMemory implements ChatMemory {
         if (CollUtil.isEmpty(messages)) {
             return;
         }
-        
+
         // 生成 Redis Key：如 CHAT:1_abc123
         String redisKey = getKey(conversationId);
-        
+
         // 绑定 List 操作器（后续操作都针对此 Key）
         BoundListOperations<String, String> listOps = stringRedisTemplate.boundListOps(redisKey);
-        
+
         // 遍历消息，逐条序列化并追加到 List 右侧（尾部）
         messages.forEach(message -> {
-            // Message 对象 → JSON 字符串
-            String jsonMessage = JSONUtil.toJsonStr(message);
+            // Message 对象 → 包装类 → JSON 字符串
+            // 使用包装类保存 messageType，解决反序列化时类型丢失问题
+            ChatMessageWrapper wrapper = ChatMessageWrapper.fromMessage(message);
+            String jsonMessage = JSONUtil.toJsonStr(wrapper);
             // RPUSH 命令：添加到 List 尾部，时间复杂度 O(1)
             listOps.rightPush(jsonMessage);
         });
-        
+
         // TODO 可优化：设置过期时间，自动清理历史会话
         // stringRedisTemplate.expire(redisKey, 7, TimeUnit.DAYS);
     }
 
     /**
      * 获取最近 lastN 条消息（核心方法）
-     * 
+     *
      * 用于构建多轮对话上下文：
      * - Spring AI 的 MessageChatMemoryAdvisor 会调用此方法
      * - 返回的消息将拼接到 system message 发送给 AI 模型
      * - AI 据此理解历史对话，实现上下文连贯的多轮对话
-     * 
+     *
      * 执行流程：
      * 1. 计算起始索引：-lastN（负数表示从尾部开始计数）
      * 2. 边界处理：lastN 为 0 时返回空列表
      * 3. Redis LRANGE：获取指定范围的消息（时间复杂度 O(N)）
-     * 4. 反序列化：JSON 字符串 → Message 对象
-     * 
+     * 4. 反序列化：JSON 字符串 → 包装类 → Message 对象
+     *
      * Redis 命令对应：
      * LRANGE CHAT:123 -10 -1  （获取最后 10 条）
      * LRANGE CHAT:123 0 -1     （获取全部）
-     * 
+     *
      * @param conversationId 会话 ID
      * @param lastN          需要获取的消息数量（如 20 表示最近 10 轮对话）
      * @return 消息列表，按时间正序（最早在前，最新在后）
@@ -146,25 +147,28 @@ public class RedisChatMemory implements ChatMemory {
         if (lastN <= 0) {
             return List.of();
         }
-        
+
         String redisKey = getKey(conversationId);
-        
+
         // LRANGE key start stop
         // -lastN 表示从尾部往前数 lastN 个位置
         // -1 表示最后一个元素（最新）
         // 示例：List 有 100 条，lastN=10 → LRANGE key -10 -1 → 获取第 91-100 条
         List<String> jsonMessages = stringRedisTemplate.boundListOps(redisKey)
                 .range(-lastN, -1);
-        
+
         // 防御：Key 不存在时返回空列表
         if (CollUtil.isEmpty(jsonMessages)) {
             return List.of();
         }
-        
-        // JSON 反序列化：String → Message 对象
-        // 注意：Spring AI 的 Message 实现了 Serializable，JSONUtil 可以正确处理
+
+        // JSON 反序列化：String → 包装类 → Message 对象
+        // 使用包装类解决 Hutool 无法反序列化 Message 接口的问题
         return jsonMessages.stream()
-                .map(json -> JSONUtil.toBean(json, Message.class))
+                .map(json -> {
+                    ChatMessageWrapper wrapper = JSONUtil.toBean(json, ChatMessageWrapper.class);
+                    return wrapper.toMessage();
+                })
                 .collect(Collectors.toList());
     }
 
@@ -175,9 +179,6 @@ public class RedisChatMemory implements ChatMemory {
      * - 用户删除会话
      * - 会话过期清理
      * - 测试环境重置数据
-     * 
-     * Redis 命令对应：
-     * DEL CHAT:123
      * 
      * @param conversationId 会话 ID
      */

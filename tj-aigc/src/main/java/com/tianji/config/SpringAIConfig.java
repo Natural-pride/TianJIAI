@@ -25,14 +25,6 @@ import org.springframework.context.annotation.Configuration;
 public class SpringAIConfig {
 
     /**
-     * 配置ChatClient，（Spring AI 的核心聊天客户端）
-     * @param chatClientBuilder 聊天客户端构建器
-     * @param loggerAdvisor 日志记录器顾问
-     * @param messageChatMemoryAdvisor 聊天记忆顾问
-     * @description 用途 ：作为整个 AI 聊天功能的入口点，统一管理日志记录和会话记忆
-     * @return ChatClient
-     */
-    /**
      * 创建并配置AI聊天客户端(ChatClient)
      * 这是Spring AI的核心组件，用于与AI模型进行交互
      * 

@@ -1,6 +1,7 @@
 package com.tianji.service;
 
 
+import com.tianji.vo.MessageVO;
 import com.tianji.vo.SessionVO;
 
 import java.util.List;
@@ -19,4 +20,6 @@ public interface ChatSessionService {
 
     // 获取热门会话
     List<SessionVO.Example> getHotSessions(Integer num);
+
+    List<MessageVO> queryBySessionId(String sessionId);
 }

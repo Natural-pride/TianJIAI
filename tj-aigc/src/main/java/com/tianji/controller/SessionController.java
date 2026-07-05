@@ -2,6 +2,7 @@ package com.tianji.controller;
 
 
 import com.tianji.service.ChatSessionService;
+import com.tianji.vo.MessageVO;
 import com.tianji.vo.SessionVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,16 @@ public class SessionController {
     @GetMapping("/hot")
     public List<SessionVO.Example> getHotSessions(@RequestParam(value = "n",defaultValue = "3") Integer num) {
         return chatSessionService.getHotSessions(num);
+    }
+
+    /**
+     * 查询单个历史对话详情
+     *
+     * @return 对话记录列表
+     */
+    @GetMapping("/{sessionId}")
+    public List<MessageVO> queryBySessionId(@PathVariable("sessionId") String sessionId) {
+        return chatSessionService.queryBySessionId(sessionId);
     }
 
 }

@@ -124,12 +124,14 @@ public class ChatServiceImpl implements ChatService {
                 // 3.1 请求大模型前，标记该会话正在生成
                 // 前端"停止生成"按钮会触发 stop 方法，移除此标记
                 .doFirst(() -> {
-                    GENERATE_STATUS.put(sessionId, true);
+                    // 将 sessionId 对应的值设为 true，表示正在生成
+                    GENERATE_STATUS.put(sessionId, true); // 标记生成开始
                 })
 
                 // 3.2 大模型输出完成，清除生成状态
                 .doOnComplete(() -> {
-                    GENERATE_STATUS.remove(sessionId);
+                    // 移除 sessionId 对应的值，表示生成完成
+                    GENERATE_STATUS.remove(sessionId); // 清除生成状态
                 })
 
                 // 3.3 大模型输出异常，清除生成状态

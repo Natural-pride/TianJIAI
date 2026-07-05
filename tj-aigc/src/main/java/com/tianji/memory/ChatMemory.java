@@ -1,6 +1,9 @@
 package com.tianji.memory;
 
-import com.alibaba.nacos.shaded.com.google.protobuf.Message;
+
+
+
+import org.springframework.ai.chat.messages.Message;
 
 import java.util.List;
 
@@ -21,8 +24,11 @@ import java.util.List;
  * - 当前接口是同步阻塞的，在 Reactor 异步流中调用会占用线程
  * - 理想情况下应提供返回 Mono/Flux 的异步版本，但 Spring AI 框架目前只支持阻塞接口
  * - 后续可考虑自定义 ReactiveChatMemory 接口以适配响应式编程
+ *
+ * 注意：继承 Spring AI 的 ChatMemory 接口，使自定义接口与 Spring AI 框架原生兼容，
+ * 避免按类型注入时因接口不兼容导致 Bean 找不到。
  */
-public interface ChatMemory {
+public interface ChatMemory extends org.springframework.ai.chat.memory.ChatMemory {
 
     /**
      * 便捷方法：添加单条消息到指定会话
