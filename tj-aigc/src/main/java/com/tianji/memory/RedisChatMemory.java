@@ -1,5 +1,6 @@
 package com.tianji.memory;
 
+import cn.hutool.core.collection.CollStreamUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.json.JSONUtil;
 import jakarta.annotation.Resource;
@@ -106,70 +107,35 @@ public class RedisChatMemory implements ChatMemory {
         BoundListOperations<String, String> listOps = stringRedisTemplate.boundListOps(redisKey);
 
         // 遍历消息，逐条序列化并追加到 List 右侧（尾部）
-        messages.forEach(message -> {
-            // Message 对象 → 包装类 → JSON 字符串
-            // 使用包装类保存 messageType，解决反序列化时类型丢失问题
-            ChatMessageWrapper wrapper = ChatMessageWrapper.fromMessage(message);
-            String jsonMessage = JSONUtil.toJsonStr(wrapper);
-            // RPUSH 命令：添加到 List 尾部，时间复杂度 O(1)
-            listOps.rightPush(jsonMessage);
-        });
+        // 将 conversationId 传递给 toJson，用于在序列化 AssistantMessage 时关联 ToolResultHolder 中的 params
+        messages.forEach(message -> listOps.rightPush(MessageUtil.toJson(message, conversationId)));
 
         // TODO 可优化：设置过期时间，自动清理历史会话
         // stringRedisTemplate.expire(redisKey, 7, TimeUnit.DAYS);
     }
 
+
     /**
-     * 获取最近 lastN 条消息（核心方法）
-     *
-     * 用于构建多轮对话上下文：
-     * - Spring AI 的 MessageChatMemoryAdvisor 会调用此方法
-     * - 返回的消息将拼接到 system message 发送给 AI 模型
-     * - AI 据此理解历史对话，实现上下文连贯的多轮对话
-     *
-     * 执行流程：
-     * 1. 计算起始索引：-lastN（负数表示从尾部开始计数）
-     * 2. 边界处理：lastN 为 0 时返回空列表
-     * 3. Redis LRANGE：获取指定范围的消息（时间复杂度 O(N)）
-     * 4. 反序列化：JSON 字符串 → 包装类 → Message 对象
-     *
-     * Redis 命令对应：
-     * LRANGE CHAT:123 -10 -1  （获取最后 10 条）
-     * LRANGE CHAT:123 0 -1     （获取全部）
-     *
+     * 获取指定会话的最近 N 条消息
      * @param conversationId 会话 ID
-     * @param lastN          需要获取的消息数量（如 20 表示最近 10 轮对话）
+     * @param lastN          需要获取的消息数量（如最近 10 轮 = 20 条消息）
      * @return 消息列表，按时间正序（最早在前，最新在后）
      */
     @Override
     public List<Message> get(String conversationId, int lastN) {
-        // 防御：lastN <= 0 时不获取任何消息
+        // 验证参数有效性，当lastN非正数时直接返回空结果
         if (lastN <= 0) {
             return List.of();
         }
-
+        // 生成Redis键名用于存储会话消息
         String redisKey = getKey(conversationId);
+        // 获取Redis列表操作对象
+        BoundListOperations<String, String> listOps = stringRedisTemplate.boundListOps(redisKey);
 
-        // LRANGE key start stop
-        // -lastN 表示从尾部往前数 lastN 个位置
-        // -1 表示最后一个元素（最新）
-        // 示例：List 有 100 条，lastN=10 → LRANGE key -10 -1 → 获取第 91-100 条
-        List<String> jsonMessages = stringRedisTemplate.boundListOps(redisKey)
-                .range(-lastN, -1);
-
-        // 防御：Key 不存在时返回空列表
-        if (CollUtil.isEmpty(jsonMessages)) {
-            return List.of();
-        }
-
-        // JSON 反序列化：String → 包装类 → Message 对象
-        // 使用包装类解决 Hutool 无法反序列化 Message 接口的问题
-        return jsonMessages.stream()
-                .map(json -> {
-                    ChatMessageWrapper wrapper = JSONUtil.toBean(json, ChatMessageWrapper.class);
-                    return wrapper.toMessage();
-                })
-                .collect(Collectors.toList());
+        // 从Redis列表中获取指定范围的元素（从第一个元素开始到lastN位置），框架默认是取100条，range相当于每次会获取最旧的聊天记忆
+        List<String> messages = listOps.range(0, lastN);
+        // 将Redis返回的字符串列表转换为Message对象列表
+        return CollStreamUtil.toList(messages, MessageUtil::toMessage);
     }
 
     /**

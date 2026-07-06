@@ -3,6 +3,7 @@ package com.tianji.config;
 
 import com.tianji.memory.RedisChatMemory;
 import com.tianji.tools.CourseTools;
+import com.tianji.tools.OrderTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -39,11 +40,12 @@ public class SpringAIConfig {
             ChatClient.Builder chatClientBuilder,
             Advisor loggerAdvisor,
             Advisor messageChatMemoryAdvisor,
-            CourseTools courseTools) {
+            CourseTools courseTools,
+            OrderTools orderTools) {
         return chatClientBuilder
                 .defaultAdvisors(loggerAdvisor,
                         messageChatMemoryAdvisor)
-                .defaultTools(courseTools) // 添加自定义工具
+                .defaultTools(courseTools, orderTools) // 添加自定义工具
                 .build();
     }
 

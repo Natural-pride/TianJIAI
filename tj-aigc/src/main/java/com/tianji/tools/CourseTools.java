@@ -9,6 +9,7 @@ import com.tianji.constants.Constant;
 import com.tianji.tools.result.CourseInfo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.model.ToolContext;
+import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;

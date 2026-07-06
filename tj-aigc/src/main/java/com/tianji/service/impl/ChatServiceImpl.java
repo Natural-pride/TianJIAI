@@ -5,6 +5,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.IdUtil;
+import com.tianji.common.utils.UserContext;
 import com.tianji.config.SystemPromptConfig;
 import com.tianji.config.ToolResultHolder;
 import com.tianji.constants.Constant;
@@ -15,8 +16,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -58,55 +62,42 @@ public class ChatServiceImpl implements ChatService {
     // 系统提示词配置
     private final SystemPromptConfig systemPromptConfig;
 
-    // 生成请求id
-    String requestId = IdUtil.fastSimpleUUID();
-
-    /**
-     * 存储大模型生成状态的线程安全 Map
-     * Key：sessionId（会话ID）
-     * Value：Boolean（true 表示正在生成，false/null 表示停止）
-     * 
-     * 设计说明：
-     * - 使用 ConcurrentHashMap 保证多用户并发安全
-     * - static 修饰，全局共享同一份状态
-     * - 当前版本使用单机内存，分布式环境建议改用 Redis
-     */
+    // 存储大模型生成状态的线程安全 Map
     private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
+
+    // 向量存储
+    private final VectorStore vectorStore;
+
     // 输出结束的标记
     private static final ChatEventVO STOP_EVENT = ChatEventVO
             .builder()
             .eventType(ChatEventTypeEnum.STOP.getValue()).build();
 
     /**
-     * 流式聊天：将用户问题提交给大模型，并以 SSE 事件流方式持续推送 AI 回复片段
-     * 
-     * 执行流程：
-     * 1. 生成 conversationId（用户ID_会话ID），用于多轮对话记忆隔离
-     * 2. 调用 ChatClient 构建请求：
-     *    - 注入系统提示词（从 Nacos 动态获取）+ 当前时间
-     *    - 注入 conversationId，激活多轮对话记忆
-     *    - 发送用户问题
-     * 3. 开启流式输出，获取 ChatResponse 流
-     * 4. Reactor 流式处理：
-     *    - doFirst：标记生成开始（状态置为 true）
-     *    - doOnComplete：标记生成完成（移除状态）
-     *    - doOnError：标记生成失败（移除状态）
-     *    - takeWhile：根据状态控制是否继续输出
-     *    - map：将 ChatResponse 转换为 ChatEventVO（DATA 事件）
-     *    - concatWith：追加 STOP 事件，通知流结束
-     * 
+     * 聊天：提交用户问题并获取大模型响应
      * @param question  用户输入的聊天内容
      * @param sessionId 会话 ID，用于关联同一会话的多轮消息
-     * @return SSE 事件流：先输出多个 DATA 事件，最后输出 STOP 事件
+     * @return 聊天响应的事件流
      */
     @Override
     public Flux<ChatEventVO> chat(String question, String sessionId) {
 
 
-
         // 1. 生成对话 ID，格式：用户ID_会话ID
         // 用于 RedisChatMemory 的 key，实现多用户多会话的对话记忆隔离
         String conversationId = ChatService.getConversationId(sessionId);
+
+        // 2. 生成请求id，用于关联本次请求中工具调用产生的额外参数（eventType=1003）
+        // 导致所有请求共享同一个 requestId，并发场景下会互相覆盖
+        String requestId = IdUtil.fastSimpleUUID();
+
+        // 获取用户id
+        Long userId = UserContext.getUser();
+
+        // 3. 将 requestId 以 conversationId 为 key存入 ToolResultHolder
+        // 这样 RedisChatMemory 在序列化 AssistantMessage 时，就能通过 conversationId 拿到 requestId，
+        // 再通过 requestId 取出工具调用产生的额外 params，最终写入 RedisMessage.params 持久化
+        ToolResultHolder.put(conversationId, Constant.REQUEST_ID, requestId);
 
         // 大模型输出内容的缓存器，用于在输出中断后的数据存储
         StringBuilder outputBuilder = new StringBuilder();
@@ -122,11 +113,15 @@ public class ChatServiceImpl implements ChatService {
 
                 // 2.2 注入多轮对话记忆的 conversationId
                 // MessageChatMemoryAdvisor 会根据此 ID 从 Redis 获取历史对话
-                .advisors(advisor -> advisor.param(
+                .advisors(advisor -> advisor
+                        // 设置RAG查询
+                        .advisors(new QuestionAnswerAdvisor(vectorStore, SearchRequest.builder().query(question).topK(5).similarityThreshold(0.5).build()))
+                        .param(
                         AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY,
                         conversationId))
                 .toolContext(MapUtil.<String,Object> builder() // 创建一个 Map 构建器
                         .put(Constant.REQUEST_ID,requestId) // 添加请求 ID
+                        .put(Constant.USER_ID, userId) // 设置用户id参数
                         .build()
                 ) // 构建 Map
                 .user(question)// 2.3 设置用户问题
@@ -182,7 +177,10 @@ public class ChatServiceImpl implements ChatService {
                         return Flux.just(chatEventVO, STOP_EVENT);
                     }
                     return Flux.just(STOP_EVENT);
-                }));
+                }))
+                // 4. 流结束后清理 conversationId → requestId 的映射，避免内存泄漏
+                // 放在 concatWith 之后，确保 RedisChatMemory 序列化时已经取到了 requestId
+                .doFinally(signal -> ToolResultHolder.remove(conversationId));
 
     }
 

@@ -79,6 +79,25 @@
             <version>1.0.0-M6.1</version>
         </dependency>
 
+        <!-- Elasticsearch 依赖 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-elasticsearch-store-spring-boot-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>co.elastic.clients</groupId>
+                    <artifactId>elasticsearch-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Elasticsearch Java Client -->
+        <dependency>
+            <groupId>co.elastic.clients</groupId>
+            <artifactId>elasticsearch-java</artifactId>
+            <version>8.15.5</version>
+        </dependency>
+
         <!--数据库相关-->
         <!-- mybatis plus 管理 -->
         <dependency>
