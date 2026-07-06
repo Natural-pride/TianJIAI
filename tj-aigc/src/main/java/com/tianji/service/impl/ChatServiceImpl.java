@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -49,6 +51,9 @@ public class ChatServiceImpl implements ChatService {
 
     // 聊天客户端
     private final ChatClient chatClient;
+
+    // 聊天记忆
+    private final ChatMemory chatMemory;
 
     // 系统提示词配置
     private final SystemPromptConfig systemPromptConfig;
@@ -103,6 +108,9 @@ public class ChatServiceImpl implements ChatService {
         // 用于 RedisChatMemory 的 key，实现多用户多会话的对话记忆隔离
         String conversationId = ChatService.getConversationId(sessionId);
 
+        // 大模型输出内容的缓存器，用于在输出中断后的数据存储
+        StringBuilder outputBuilder = new StringBuilder();
+
         // 2. 构建流式请求并返回事件流
         return chatClient.prompt()
 
@@ -140,6 +148,10 @@ public class ChatServiceImpl implements ChatService {
                 .doOnError(throwable -> { // 3.3 大模型输出异常，清除生成状态
                     GENERATE_STATUS.remove(sessionId);
                 })
+                //
+                .doOnCancel(() -> {  // 当输出被取消时，保存输出的内容到历史记录中
+                    saveStopHistoryRecord(conversationId, outputBuilder.toString());
+                })
 
                 // 3.4 根据生成状态控制是否继续输出
                 // 只要 sessionId 对应的状态为 true，就继续推送
@@ -150,6 +162,8 @@ public class ChatServiceImpl implements ChatService {
                 .map(chatResponse -> {
                     // 提取 AI 回复的文本片段
                     String content = chatResponse.getResult().getOutput().getText();
+                    // 追加到输出内容中
+                    outputBuilder.append(content);
                     return ChatEventVO.builder()
                             .eventData(content)
                             .eventType(ChatEventTypeEnum.DATA.getValue())
@@ -174,7 +188,6 @@ public class ChatServiceImpl implements ChatService {
 
     /**
      * 停止聊天：中断当前正在进行的 AI 生成
-     * 
      * 实现原理：
      * 从 GENERATE_STATUS Map 中移除 sessionId 对应的标记
      * takeWhile 检测到状态为 null/false 后，立即停止流式输出
@@ -184,5 +197,15 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public void stop(String sessionId) {
         GENERATE_STATUS.remove(sessionId);
+    }
+
+    /**
+     * 保存停止输出的记录
+     *
+     * @param conversationId 会话id
+     * @param content        大模型输出的内容
+     */
+    private void saveStopHistoryRecord(String conversationId, String content) {
+        chatMemory.add(conversationId, new AssistantMessage(content));
     }
 }
