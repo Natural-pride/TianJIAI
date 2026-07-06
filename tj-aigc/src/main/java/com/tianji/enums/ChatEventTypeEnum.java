@@ -19,22 +19,10 @@ import lombok.Getter;
 @Getter
 public enum ChatEventTypeEnum implements BaseEnum {
 
-    /**
-     * 数据事件：携带 AI 回复的文本片段
-     * 前端处理：将 eventData 内容追加到对话展示区域
-     */
     DATA(1001, "数据事件"),
 
-    /**
-     * 停止事件：通知前端本轮对话已结束
-     * 前端处理：关闭 SSE 连接，更新 UI 状态为"生成完成"
-     */
     STOP(1002, "停止事件"),
 
-    /**
-     * 参数事件（预留）：用于动态调整 AI 行为参数
-     * 前端展示示例：显示"正在调整回复风格为正式"
-     */
     PARAM(1003, "参数事件");
 
     private final int value;

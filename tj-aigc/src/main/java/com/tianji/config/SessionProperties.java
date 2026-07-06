@@ -8,6 +8,15 @@ import org.springframework.context.annotation.Configuration;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * @Name:SessionProperties.java
+ * @Author: Natural Pride
+ * @CreateTime: 2026/7/6 20:42
+ * @Description:
+ * 从 application.yml 或 Nacos 读取会话相关配置
+ * 配置和代码分离：修改AI助手标题/热门话题不需要改代码
+ */
+
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "tj.ai.session")

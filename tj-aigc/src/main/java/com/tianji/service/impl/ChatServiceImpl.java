@@ -1,6 +1,5 @@
 package com.tianji.service.impl;
 
-
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.map.MapUtil;
@@ -29,46 +28,27 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 聊天服务实现类
- * 
- * 核心职责：
- * 1. 调用 Spring AI 的 ChatClient，提交用户问题并获取大模型响应
- * 2. 通过 Reactor Flux 实现流式响应，实时推送 AI 回复片段
- * 3. 支持多轮对话记忆，通过 RedisChatMemory 关联历史上下文
- * 4. 提供停止生成功能，用户可随时中断 AI 输出
- * 
- * 技术架构：
- * - 响应式编程：使用 Project Reactor 的 Flux 处理流式数据
- * - 线程安全：ConcurrentHashMap 存储生成状态，支持多用户并发
- * - 配置驱动：系统提示词从 Nacos 动态加载，支持热更新
- * 
+ * 聊天服务实现，集成 Spring AI 实现流式多轮对话
+ *
  * @Name: ChatServiceImpl
  * @Author: Natural Pride
  * @CreateTime: 2026/7/3 16:18
  * @Description: 聊天服务实现，集成 Spring AI 实现流式多轮对话
  */
-
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
-    // 聊天客户端
     private final ChatClient chatClient;
-
-    // 聊天记忆
     private final ChatMemory chatMemory;
-
-    // 系统提示词配置
     private final SystemPromptConfig systemPromptConfig;
-
-    // 存储大模型生成状态的线程安全 Map
-    private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
-
-    // 向量存储
     private final VectorStore vectorStore;
 
-    // 输出结束的标记
+    // 存储大模型生成状态的线程安全 Map，key 为 sessionId
+    private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
+
+    // 输出结束标记
     private static final ChatEventVO STOP_EVENT = ChatEventVO
             .builder()
             .eventType(ChatEventTypeEnum.STOP.getValue()).build();
@@ -81,83 +61,52 @@ public class ChatServiceImpl implements ChatService {
      */
     @Override
     public Flux<ChatEventVO> chat(String question, String sessionId) {
-
-
-        // 1. 生成对话 ID，格式：用户ID_会话ID
-        // 用于 RedisChatMemory 的 key，实现多用户多会话的对话记忆隔离
+        // 生成对话 ID，格式：用户ID_会话ID，用于 RedisChatMemory 的 key，实现多用户多会话的对话记忆隔离
         String conversationId = ChatService.getConversationId(sessionId);
 
-        // 2. 生成请求id，用于关联本次请求中工具调用产生的额外参数（eventType=1003）
-        // 导致所有请求共享同一个 requestId，并发场景下会互相覆盖
+        // 生成请求id，用于关联本次请求中工具调用产生的额外参数（eventType=1003）
         String requestId = IdUtil.fastSimpleUUID();
 
-        // 获取用户id
         Long userId = UserContext.getUser();
 
-        // 3. 将 requestId 以 conversationId 为 key存入 ToolResultHolder
-        // 这样 RedisChatMemory 在序列化 AssistantMessage 时，就能通过 conversationId 拿到 requestId，
-        // 再通过 requestId 取出工具调用产生的额外 params，最终写入 RedisMessage.params 持久化
+        // 将 requestId 以 conversationId 为 key 存入 ToolResultHolder
+        // RedisChatMemory 序列化 AssistantMessage 时，通过 conversationId → requestId → params 写入 RedisMessage.params
         ToolResultHolder.put(conversationId, Constant.REQUEST_ID, requestId);
 
-        // 大模型输出内容的缓存器，用于在输出中断后的数据存储
+        // 大模型输出内容的缓存器，用于输出中断后保存到历史记录
         StringBuilder outputBuilder = new StringBuilder();
 
-        // 2. 构建流式请求并返回事件流
         return chatClient.prompt()
-
-                // 2.1 注入系统提示词和当前时间
-                // 提示词模板从 Nacos 加载，支持 {{now}} 等占位符
+                // 注入系统提示词和当前时间，提示词模板从 Nacos 加载，支持 {{now}} 占位符
                 .system(promptSystem -> promptSystem
                         .text(systemPromptConfig.getChatSystemMessage().get())
                         .param("now", DateUtil.now()))
-
-                // 2.2 注入多轮对话记忆的 conversationId
-                // MessageChatMemoryAdvisor 会根据此 ID 从 Redis 获取历史对话
+                // 注入多轮对话记忆的 conversationId，MessageChatMemoryAdvisor 会根据此 ID 从 Redis 获取历史对话
                 .advisors(advisor -> advisor
-                        // 设置RAG查询
+                        // 设置 RAG 查询
                         .advisors(new QuestionAnswerAdvisor(vectorStore, SearchRequest.builder().query(question).topK(5).similarityThreshold(0.5).build()))
                         .param(
-                        AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY,
-                        conversationId))
-                .toolContext(MapUtil.<String,Object> builder() // 创建一个 Map 构建器
-                        .put(Constant.REQUEST_ID,requestId) // 添加请求 ID
-                        .put(Constant.USER_ID, userId) // 设置用户id参数
-                        .build()
-                ) // 构建 Map
-                .user(question)// 2.3 设置用户问题
-                .stream() // 2.4 开启流式输出模式
-                .chatResponse()  // 2.5 获取 ChatResponse 流（包含元数据信息）
-
-                // 3. Reactor 流式处理
-
-                // 3.1 请求大模型前，标记该会话正在生成
-                // 前端"停止生成"按钮会触发 stop 方法，移除此标记
-                .doFirst(() -> {
-                    GENERATE_STATUS.put(sessionId, true); // 将 sessionId 对应的值设为 true，表示正在生成
-                })
-
-                // 3.2 大模型输出完成，清除生成状态
-                .doOnComplete(() -> {
-                    GENERATE_STATUS.remove(sessionId);  // 移除 sessionId 对应的值，表示生成完成
-                })
-                .doOnError(throwable -> { // 3.3 大模型输出异常，清除生成状态
-                    GENERATE_STATUS.remove(sessionId);
-                })
-                //
-                .doOnCancel(() -> {  // 当输出被取消时，保存输出的内容到历史记录中
-                    saveStopHistoryRecord(conversationId, outputBuilder.toString());
-                })
-
-                // 3.4 根据生成状态控制是否继续输出
-                // 只要 sessionId 对应的状态为 true，就继续推送
-                // 状态被移除（null）或变为 false，则立即停止流
+                                AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY,
+                                conversationId))
+                .toolContext(MapUtil.<String, Object>builder()
+                        .put(Constant.REQUEST_ID, requestId)
+                        .put(Constant.USER_ID, userId)
+                        .build())
+                .user(question)
+                .stream()
+                .chatResponse()
+                // 标记该会话正在生成，前端"停止生成"按钮会触发 stop 方法移除标记
+                .doFirst(() -> GENERATE_STATUS.put(sessionId, true))
+                // 大模型输出完成或异常，清除生成状态
+                .doOnComplete(() -> GENERATE_STATUS.remove(sessionId))
+                .doOnError(throwable -> GENERATE_STATUS.remove(sessionId))
+                // 输出被取消时，保存已输出的内容到历史记录
+                .doOnCancel(() -> saveStopHistoryRecord(conversationId, outputBuilder.toString()))
+                // 根据生成状态控制是否继续输出，状态被移除（null/false）则停止流
                 .takeWhile(s -> Optional.ofNullable(GENERATE_STATUS.get(sessionId)).orElse(false))
-
-                // 3.5 将每个 ChatResponse chunk 转换为前端可消费的 DATA 事件
+                // 将每个 ChatResponse chunk 转换为前端可消费的 DATA 事件
                 .map(chatResponse -> {
-                    // 提取 AI 回复的文本片段
                     String content = chatResponse.getResult().getOutput().getText();
-                    // 追加到输出内容中
                     outputBuilder.append(content);
                     return ChatEventVO.builder()
                             .eventData(content)
@@ -165,11 +114,11 @@ public class ChatServiceImpl implements ChatService {
                             .build();
                 })
                 .concatWith(Flux.defer(() -> {
-                    // 通过请求id获取到参数列表，如果不为空，就将其追加到返回结果中
-                    Map<String,Object> map = ToolResultHolder.get(requestId);
+                    // 通过请求id获取工具调用参数，追加到返回结果中
+                    Map<String, Object> map = ToolResultHolder.get(requestId);
                     if (CollUtil.isNotEmpty(map)) {
-                        ToolResultHolder.remove(requestId); // 清除参数列表，以避免oom，放在这里是合适的，因为concatWith不管有没有什么异常情况，都会执行
-                        // 响应给前端的参数数据
+                        // 清除参数列表以避免 OOM，放在 concatWith 里确保无论是否异常都会执行
+                        ToolResultHolder.remove(requestId);
                         ChatEventVO chatEventVO = ChatEventVO.builder()
                                 .eventData(map)
                                 .eventType(ChatEventTypeEnum.PARAM.getValue())
@@ -178,18 +127,16 @@ public class ChatServiceImpl implements ChatService {
                     }
                     return Flux.just(STOP_EVENT);
                 }))
-                // 4. 流结束后清理 conversationId → requestId 的映射，避免内存泄漏
+                // 流结束后清理 conversationId → requestId 的映射，避免内存泄漏
                 // 放在 concatWith 之后，确保 RedisChatMemory 序列化时已经取到了 requestId
                 .doFinally(signal -> ToolResultHolder.remove(conversationId));
-
     }
 
     /**
      * 停止聊天：中断当前正在进行的 AI 生成
-     * 实现原理：
-     * 从 GENERATE_STATUS Map 中移除 sessionId 对应的标记
-     * takeWhile 检测到状态为 null/false 后，立即停止流式输出
-     * 
+     * 实现原理：从 GENERATE_STATUS Map 中移除 sessionId 对应的标记，
+     *          takeWhile 检测到状态为 null/false 后，立即停止流式输出
+     *
      * @param sessionId 需要停止的会话 ID
      */
     @Override

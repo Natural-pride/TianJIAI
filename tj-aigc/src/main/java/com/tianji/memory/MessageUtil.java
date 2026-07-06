@@ -11,30 +11,27 @@ import org.springframework.ai.chat.messages.*;
 import java.util.Map;
 
 /**
- * 消息转换工具类，提供消息对象与JSON字符串之间的转换功能，主要用于Redis存储格式转换
+ * 消息转换工具类，提供 Message 对象与 Redis 存储格式 JSON 之间的双向转换
  */
 public class MessageUtil {
 
     /**
-     * 将Message对象转换为Redis存储格式的JSON字符串（重载，携带 conversationId 以关联 ToolResultHolder 中的 params）
+     * 将 Message 对象转换为 Redis 存储格式的 JSON 字符串
      *
-     * 存储 AssistantMessage 时，如果是携带工具调用结果的消息（如课程查询、预下单等产生 eventType=1003 额外数据），
-     * 需要通过 conversationId 从 ToolResultHolder 中取出 requestId，再通过 requestId 取出 params 列表，
-     * 最终写入 RedisMessage.params 字段进行持久化。
+     * 携带 conversationId 是为了在序列化 AssistantMessage 时，通过 conversationId → requestId → params
+     * 链路获取工具调用产生的额外参数，最终写入 RedisMessage.params 持久化
      *
      * @param message        需要转换的原始消息对象
      * @param conversationId 会话 ID，作为 ToolResultHolder 中 requestId 的查找 key
-     * @return 符合Redis存储规范的JSON字符串
+     * @return 符合 Redis 存储规范的 JSON 字符串
      */
     public static String toJson(Message message, String conversationId) {
         RedisMessage redisMessage = BeanUtil.toBean(message, RedisMessage.class);
-        // 设置消息内容
         redisMessage.setTextContent(message.getText());
         if (message instanceof AssistantMessage assistantMessage) {
             redisMessage.setToolCalls(assistantMessage.getToolCalls());
 
-            // 关键修复：通过 conversationId 获取本次请求的 requestId，
-            // 再通过 requestId 获取工具调用产生的额外参数（params），写入 RedisMessage.params 持久化
+            // 通过 conversationId → requestId → params 获取工具调用产生的额外参数
             String requestId = Convert.toStr(ToolResultHolder.get(conversationId, Constant.REQUEST_ID));
             if (requestId != null) {
                 Map<String, Object> params = ToolResultHolder.get(requestId);
@@ -50,10 +47,10 @@ public class MessageUtil {
     }
 
     /**
-     * 将Message对象转换为Redis存储格式的JSON字符串（保留单参数重载以兼容其他可能的调用方）
+     * 将 Message 对象转换为 Redis 存储格式的 JSON 字符串（不关联 ToolResultHolder 中的 params）
      *
      * @param message 需要转换的原始消息对象
-     * @return 符合Redis存储规范的JSON字符串
+     * @return 符合 Redis 存储规范的 JSON 字符串
      */
     public static String toJson(Message message) {
         RedisMessage redisMessage = BeanUtil.toBean(message, RedisMessage.class);
@@ -68,10 +65,10 @@ public class MessageUtil {
     }
 
     /**
-     * 将Redis存储的JSON字符串反序列化为对应的Message对象
+     * 将 Redis 存储的 JSON 字符串反序列化为对应的 Message 对象
      *
-     * @param json Redis存储的JSON格式消息数据
-     * @return 对应类型的Message对象
+     * @param json Redis 存储的 JSON 格式消息数据
+     * @return 对应类型的 Message 对象
      * @throws RuntimeException 当无法识别的消息类型时抛出异常
      */
     public static Message toMessage(String json) {

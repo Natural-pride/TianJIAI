@@ -39,14 +39,6 @@ public class ChatController {
     /**
      * 流式聊天接口
      * 
-     * 请求格式：POST /chat，Content-Type: application/json
-     * 请求体示例：{"question": "你好", "sessionId": "abc123"}
-     * 
-     * 响应格式：SSE (Server-Sent Events)
-     * 响应示例：
-     *   data: {"eventData":"您好","eventType":1001}
-     *   data: {"eventType":1002}
-     * 
      * @param chatDTO 聊天数据传输对象，包含用户问题和会话ID
      * @return SSE 事件流，包含 AI 回复片段和结束标志
      */
@@ -58,12 +50,7 @@ public class ChatController {
 
     /**
      * 停止聊天接口
-     * 
-     * 请求格式：POST /chat/stop?sessionId=abc123
-     * 
-     * 应用场景：用户在 AI 回复过程中点击"停止生成"按钮
-     * 实现原理：清除生成状态标记，触发 takeWhile 停止流式输出
-     * 
+     *
      * @param sessionId 会话 ID，用于标识需要停止的对话
      */
     @PostMapping("/stop")

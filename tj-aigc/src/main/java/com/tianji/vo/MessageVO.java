@@ -8,6 +8,13 @@ import lombok.NoArgsConstructor;
 
 import java.util.Map;
 
+/**
+ * @Name:MessageVO.java
+ * @Author: Natural Pride
+ * @CreateTime: 2026/7/6 20:43
+ * @Description: 用于返回聊天记录给前端，包含消息类型（USER/ASSISTANT）和内容
+ */
+
 @Data
 @Builder
 @NoArgsConstructor

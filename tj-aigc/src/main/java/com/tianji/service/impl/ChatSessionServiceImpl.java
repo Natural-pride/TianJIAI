@@ -45,31 +45,31 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
 
     @Override
     public SessionVO createSession(Integer num) {
-        // 获取AI助手标题和描述
+        // 从配置文件复制属性到SessionVO
         SessionVO sessionVO = BeanUtil.toBean(sessionProperties, SessionVO.class);
 
-        // 随机获取热门话题（防御：配置中 examples 可能为 null 或为空，避免 NPE）
+        // 处理热门话题（examples），随机获取num个，避免每次返回一样的顺序
         List<SessionVO.Example> examples = sessionProperties.getExamples();
         if (CollUtil.isEmpty(examples)) {
-            // 防御：配置中 examples 可能为 null 或为空，避免 NPE
+            // 防御性编程：如果配置中没有热门话题，返回空列表，避免NPE
             sessionVO.setExamples(Collections.emptyList());
         } else {
-            // 随机获取热门话题，数量为 num
             sessionVO.setExamples(RandomUtil.randomEleList(examples, num));
         }
 
-        // 随机生成会话ID
+        // 生成唯一的会话ID，保证全局唯一，避免会话冲突
         sessionVO.setSessionId(IdUtil.fastSimpleUUID());
 
-        // 构建持久化对象(组装会话信息)，并持久化
+        // 构建持久化对象，只保存sessionId和userId，其他字段在数据库层有默认值
         ChatSession chatSession = ChatSession.builder()
                 .sessionId(sessionVO.getSessionId())
                 .userId(UserContext.getUser())
                 .build();
-        // 保存会话信息
-        save(chatSession);
-        return sessionVO;
 
+        // 保存到数据库
+        save(chatSession);
+
+        return sessionVO;
     }
 
     /**
@@ -78,7 +78,7 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
      */
     @Override
     public List<SessionVO.Example> getHotSessions(Integer num) {
-        return RandomUtil.randomEleList(sessionProperties.getExamples(),num);
+        return RandomUtil.randomEleList(sessionProperties.getExamples(), num);
     }
 
     private final ChatMemory chatMemory;
@@ -87,15 +87,13 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
 
     @Override
     public List<MessageVO> queryBySessionId(String sessionId) {
-        // 根据会话ID获取对话ID
+        // 根据会话ID获取对话ID，从Redis中获取历史消息
         String conversationId = ChatService.getConversationId(sessionId);
-        // 从Redis中获取历史消息
         List<Message> messageList = chatMemory.get(conversationId, HISTORY_MESSAGE_COUNT);
         // 过滤并转换消息列表
         return StreamUtil.of(messageList)
-                // 过滤掉非用户消息和助手消息
+                // 只保留用户消息和助手消息，过滤掉系统消息等其他类型
                 .filter(message -> message.getMessageType() == MessageType.ASSISTANT || message.getMessageType() == MessageType.USER)
-                // 转换为MessageVO对象
                 .map(message -> MessageVO.builder()
                         .content(message.getText())
                         .type(MessageTypeEnum.valueOf(message.getMessageType().name()))

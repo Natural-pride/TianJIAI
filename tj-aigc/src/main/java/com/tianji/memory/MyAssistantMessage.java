@@ -7,12 +7,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * @Name:MyAssistantMessage.java
+ * 自定义 AssistantMessage，扩展 params 字段用于存储工具调用产生的额外参数
+ *
+ * @Name: MyAssistantMessage
  * @Author: Natural Pride
  * @CreateTime: 2026/7/6 15:30
- * @Description:  自定义AssistantMessage类，用于存储额外的参数信息
+ * @Description: 自定义 AssistantMessage 类，用于存储额外的参数信息
  */
-
 public class MyAssistantMessage extends AssistantMessage {
 
     private Map<String, Object> params = Map.of();
