@@ -1,8 +1,13 @@
 package com.tianji.service.impl;
 
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.date.DateUtil;
+import cn.hutool.core.map.MapUtil;
+import cn.hutool.core.util.IdUtil;
 import com.tianji.config.SystemPromptConfig;
+import com.tianji.config.ToolResultHolder;
+import com.tianji.constants.Constant;
 import com.tianji.enums.ChatEventTypeEnum;
 import com.tianji.service.ChatService;
 import com.tianji.vo.ChatEventVO;
@@ -42,17 +47,14 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
-    /**
-     * Spring AI 聊天客户端，用于调用大模型
-     * 在 SpringAIConfig 中配置，已注入日志记录器和记忆顾问器
-     */
+    // 聊天客户端
     private final ChatClient chatClient;
 
-    /**
-     * 系统提示词配置类，从 Nacos 动态加载
-     * 包含 AI 人设、能力范围、回答风格等提示词内容
-     */
+    // 系统提示词配置
     private final SystemPromptConfig systemPromptConfig;
+
+    // 生成请求id
+    String requestId = IdUtil.fastSimpleUUID();
 
     /**
      * 存储大模型生成状态的线程安全 Map
@@ -65,6 +67,10 @@ public class ChatServiceImpl implements ChatService {
      * - 当前版本使用单机内存，分布式环境建议改用 Redis
      */
     private static final Map<String, Boolean> GENERATE_STATUS = new ConcurrentHashMap<>();
+    // 输出结束的标记
+    private static final ChatEventVO STOP_EVENT = ChatEventVO
+            .builder()
+            .eventType(ChatEventTypeEnum.STOP.getValue()).build();
 
     /**
      * 流式聊天：将用户问题提交给大模型，并以 SSE 事件流方式持续推送 AI 回复片段
@@ -91,6 +97,8 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public Flux<ChatEventVO> chat(String question, String sessionId) {
 
+
+
         // 1. 生成对话 ID，格式：用户ID_会话ID
         // 用于 RedisChatMemory 的 key，实现多用户多会话的对话记忆隔离
         String conversationId = ChatService.getConversationId(sessionId);
@@ -109,33 +117,27 @@ public class ChatServiceImpl implements ChatService {
                 .advisors(advisor -> advisor.param(
                         AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY,
                         conversationId))
-
-                // 2.3 设置用户问题
-                .user(question)
-
-                // 2.4 开启流式输出模式
-                .stream()
-
-                // 2.5 获取 ChatResponse 流（包含元数据信息）
-                .chatResponse()
+                .toolContext(MapUtil.<String,Object> builder() // 创建一个 Map 构建器
+                        .put(Constant.REQUEST_ID,requestId) // 添加请求 ID
+                        .build()
+                ) // 构建 Map
+                .user(question)// 2.3 设置用户问题
+                .stream() // 2.4 开启流式输出模式
+                .chatResponse()  // 2.5 获取 ChatResponse 流（包含元数据信息）
 
                 // 3. Reactor 流式处理
 
                 // 3.1 请求大模型前，标记该会话正在生成
                 // 前端"停止生成"按钮会触发 stop 方法，移除此标记
                 .doFirst(() -> {
-                    // 将 sessionId 对应的值设为 true，表示正在生成
-                    GENERATE_STATUS.put(sessionId, true); // 标记生成开始
+                    GENERATE_STATUS.put(sessionId, true); // 将 sessionId 对应的值设为 true，表示正在生成
                 })
 
                 // 3.2 大模型输出完成，清除生成状态
                 .doOnComplete(() -> {
-                    // 移除 sessionId 对应的值，表示生成完成
-                    GENERATE_STATUS.remove(sessionId); // 清除生成状态
+                    GENERATE_STATUS.remove(sessionId);  // 移除 sessionId 对应的值，表示生成完成
                 })
-
-                // 3.3 大模型输出异常，清除生成状态
-                .doOnError(throwable -> {
+                .doOnError(throwable -> { // 3.3 大模型输出异常，清除生成状态
                     GENERATE_STATUS.remove(sessionId);
                 })
 
@@ -153,12 +155,21 @@ public class ChatServiceImpl implements ChatService {
                             .eventType(ChatEventTypeEnum.DATA.getValue())
                             .build();
                 })
+                .concatWith(Flux.defer(() -> {
+                    // 通过请求id获取到参数列表，如果不为空，就将其追加到返回结果中
+                    Map<String,Object> map = ToolResultHolder.get(requestId);
+                    if (CollUtil.isNotEmpty(map)) {
+                        ToolResultHolder.remove(requestId); // 清除参数列表，以避免oom，放在这里是合适的，因为concatWith不管有没有什么异常情况，都会执行
+                        // 响应给前端的参数数据
+                        ChatEventVO chatEventVO = ChatEventVO.builder()
+                                .eventData(map)
+                                .eventType(ChatEventTypeEnum.PARAM.getValue())
+                                .build();
+                        return Flux.just(chatEventVO, STOP_EVENT);
+                    }
+                    return Flux.just(STOP_EVENT);
+                }));
 
-                // 3.6 在流尾部追加一条 STOP 事件
-                // 前端收到此事件后，关闭 SSE 连接，更新 UI 状态
-                .concatWith(Flux.just(ChatEventVO.builder()
-                        .eventType(ChatEventTypeEnum.STOP.getValue())
-                        .build()));
     }
 
     /**

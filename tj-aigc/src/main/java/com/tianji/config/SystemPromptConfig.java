@@ -14,25 +14,15 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 系统提示词配置类
- * 
- * 核心职责：
- * 1. 从 Nacos 配置中心动态加载 AI 聊天系统的系统提示词（System Prompt）
- * 2. 注册配置变更监听器，实现配置的热更新（无需重启服务即可生效）
- * 3. 使用 AtomicReference 保证多线程环境下配置读取的可见性和原子性
- * 
- * 工作流程：
- * 应用启动 → @PostConstruct 初始化 → 从 Nacos 拉取初始配置 → 注册监听器
- * Nacos 配置变更 → 触发 receiveConfigInfo → 自动更新 chatSystemMessage
- * 
- * 业务价值：
- * - 运营人员可在 Nacos 动态调整 AI 人设、回答风格、能力范围
- * - 修改即时生效，无需部署发版，降低运维成本
- * - 不同环境（开发/测试/生产）可使用不同提示词配置
- * 
  * @Name: SystemPromptConfig
  * @Author: Natural Pride
  * @CreateTime: 2026/7/3 17:14
  * @Description: 系统提示词动态配置类，从 Nacos 加载并支持热更新
+ * 核心职责：
+ * 1. 从 Nacos 配置中心动态加载 AI 聊天系统的系统提示词（System Prompt）
+ * 2. 注册配置变更监听器，实现配置的热更新（无需重启服务即可生效）
+ * 3. 使用 AtomicReference 保证多线程环境下配置读取的可见性和原子性
+
  */
 
 

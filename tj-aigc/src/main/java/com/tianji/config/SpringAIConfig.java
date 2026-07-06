@@ -2,6 +2,7 @@ package com.tianji.config;
 
 
 import com.tianji.memory.RedisChatMemory;
+import com.tianji.tools.CourseTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -14,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
  * Spring AI 核心配置类
  * 负责配置聊天客户端(ChatClient)及相关的顾问器(Advisor)和记忆存储(Memory)
  * 为整个AI聊天功能提供统一的客户端管理和记忆能力
- * 
+ *
  * @Name: SpringAIConfig
  * @Author: Natural Pride
  * @CreateTime: 2026/7/3 16:20
@@ -27,18 +28,22 @@ public class SpringAIConfig {
     /**
      * 创建并配置AI聊天客户端(ChatClient)
      * 这是Spring AI的核心组件，用于与AI模型进行交互
-     * 
-     * @param chatClientBuilder 由Spring AI自动配置的构建器，包含基础配置（如API密钥、模型选择等）
-     * @param loggerAdvisor 日志记录顾问器，用于记录请求和响应的详细信息
+     *
+     * @param chatClientBuilder        由Spring AI自动配置的构建器，包含基础配置（如API密钥、模型选择等）
+     * @param loggerAdvisor            日志记录顾问器，用于记录请求和响应的详细信息
      * @param messageChatMemoryAdvisor 聊天记忆顾问器，实现多轮对话的上下文管理
      * @return 配置完成的ChatClient实例，供整个项目注入使用
      */
     @Bean
-    public ChatClient chatClient(ChatClient.Builder chatClientBuilder,
-                                 Advisor loggerAdvisor,
-                                 Advisor messageChatMemoryAdvisor) {
+    public ChatClient chatClient(
+            ChatClient.Builder chatClientBuilder,
+            Advisor loggerAdvisor,
+            Advisor messageChatMemoryAdvisor,
+            CourseTools courseTools) {
         return chatClientBuilder
-                .defaultAdvisors(loggerAdvisor, messageChatMemoryAdvisor)
+                .defaultAdvisors(loggerAdvisor,
+                        messageChatMemoryAdvisor)
+                .defaultTools(courseTools) // 添加自定义工具
                 .build();
     }
 
@@ -54,8 +59,9 @@ public class SpringAIConfig {
 
     /**
      * 创建自定义的 RedisChatMemory Bean
-     * @description 用途 ：创建自定义的 RedisChatMemory 实现，用于存储和检索聊天会话记忆
+     *
      * @return ChatMemory
+     * @description 用途 ：创建自定义的 RedisChatMemory 实现，用于存储和检索聊天会话记忆
      */
     @Bean
     public ChatMemory chatMemory() {
@@ -69,10 +75,10 @@ public class SpringAIConfig {
      * 1. 每次请求前：从ChatMemory获取历史对话记录
      * 2. 将历史对话整合到当前请求的system message中发送给AI模型
      * 3. 每次响应后：将当前轮次的对话保存到ChatMemory中
-     * 
+     * <p>
      * 这样AI模型就能理解上下文，实现真正的多轮对话能力
      * 例如：用户在上一轮提到"帮我查订单"，下一轮问"到哪了"时，AI能理解是指订单物流
-     * 
+     *
      * @param chatMemory 聊天记忆存储实现（这里使用Redis实现分布式会话共享）
      */
     @Bean
